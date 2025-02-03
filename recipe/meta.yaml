@@ -483,6 +483,133 @@ outputs:
         - icpx -fsycl ${CXXFLAGS} simple.cpp ${LDFLAGS} -lpthread -o simple.exe  # [unix]
         - icpx -fsycl simple.cpp -I%PREFIX%\include -o simple.exe  # [win]
 
+  - name: ifx_impl_{{ target_platform }}
+    script: repack.sh   # [unix]
+    script: repack.bat  # [win]
+    build:
+      skip: True  # [not (linux64 or win64)]
+      binary_relocation: False
+      ignore_run_exports_from:
+        - {{ c_stdlib }}_{{ target_platform }}
+      run_exports:
+        # 1. strong so it gets added if this package is in the build requirement section.
+        # 2. Pin to year for now, similar to MKL.
+        strong:
+          - {{ pin_subpackage('intel-cmplr-lib-rt', exact=True) }}
+          # TODO: this is CPU runtime, do we want to strongly link it?
+          - {{ pin_subpackage('intel-opencl-rt', exact=True) }}
+          - {{ pin_subpackage('intel-sycl-rt', exact=True) }}
+          - {{ pin_compatible("libgcc-ng") }}     # [linux64]
+          - {{ pin_compatible("libstdcxx-ng") }}  # [linux64]
+    requirements:
+      build:
+        - {{ compiler('c') }}
+        - {{ compiler('cxx') }}
+        - {{ stdlib('c') }}
+      host:
+        - zlib
+        - {{ pin_subpackage('intel-cmplr-lib-rt', exact=True) }}
+        # TODO: this is CPU runtime, do we want to strongly link it?
+        - {{ pin_subpackage('intel-opencl-rt', exact=True) }}
+        - {{ pin_subpackage('intel-sycl-rt', exact=True) }}
+        - ocl-icd  # [linux]
+        - khronos-opencl-icd-loader  # [win]
+        # FIXME due to a conda-build bug, we need to tell conda-build that dpcpp-cpp-rt depends
+        # on llvm openmp instead of gnu
+        - _openmp_mutex * *_llvm   # [linux]
+        - llvm-openmp              # [not linux]
+      run:
+        - {{ pin_subpackage('intel-cmplr-lib-rt', exact=True) }}
+        - {{ pin_subpackage('intel-sycl-rt', exact=True) }}
+        # TODO: this is CPU runtime, do we want to strongly link it?
+        - {{ pin_subpackage('intel-opencl-rt', exact=True) }}
+        - binutils_impl_{{ target_platform }} >={{ binutils_version }}        # [linux]
+        - libgcc-devel_{{ target_platform }} >={{ c_compiler_version }}       # [linux]
+        - libstdcxx-devel_{{ target_platform }} >={{ cxx_compiler_version }}  # [linux]
+        # None of the other compilers pin to sysroot, so we don't either. It
+        # also appears that sysroot version must be aligned with host system,
+        # e.g.:
+        # https://github.com/conda-forge/ctng-compiler-activation-feedstock/issues/108
+        - {{ c_stdlib }}_{{ target_platform }}  # [not linux]
+        # We setting up minimal version for sysroot cause it is a requirement
+        # of dpcpp compiler
+        - {{ c_stdlib }}_{{ target_platform }} >={{ c_stdlib_version }}  # [linux]
+      run_constrained:
+        # prevent clobbering if user have mixed environment with intel's channel
+        - compiler_shared <0a0
+    about:
+      home: https://software.intel.com/content/www/us/en/develop/tools.html
+      doc_url: https://software.intel.com/content/www/us/en/develop/tools/oneapi/components/dpc-compiler.html
+      dev_url: https://software.intel.com/content/www/us/en/develop/documentation/oneapi-dpcpp-cpp-compiler-dev-guide-and-reference/top.html
+      summary: Implementation for Intel® oneAPI DPC++/C++ Compiler
+      license: LicenseRef-Proprietary-Intel-End-User-License-Agreement-for-Developer-Tools
+      license_family: Proprietary
+      license_file:
+        - dpcpp_impl_{{ target_platform }}/info/licenses/license.txt  # [linux64 or win64]
+        - dpcpp_impl_{{ target_platform }}/info/licenses/tpp.txt      # [linux64 or win64]
+      description: |
+        Implementation for Intel® oneAPI DPC++/C++ Compiler.
+        This package is a repackaged set of binaries obtained directly from Intel's Anaconda.org channel.
+    test:
+      commands:
+        - ls -A1 ${PREFIX}/bin/*         # [unix]
+        - ls -A1 ${PREFIX}/include/*     # [unix]
+        - ls -A1 ${PREFIX}/lib/*         # [unix]
+        - test -f ${PREFIX}/include/sycl/CL/sycl.hpp  # [unix]
+        - dir %PREFIX%\Library\bin\*  # [win]
+        - dir %PREFIX%\Library\lib\*  # [win]
+        - ifx --version
+
+  - name: ifx_{{ target_platform }}
+    script: install_activate.sh   # [unix]
+    script: install_activate.bat  # [win]
+    build:
+      skip: True  # [not (linux64 or win64)]
+      run_exports:
+        # 1. strong so it gets added if this package is in the build requirement section.
+        # 2. Pin to year for now, similar to MKL.
+        strong:
+          - {{ pin_subpackage("fortran-rt", max_pin="x") }}
+    requirements:
+      run:
+        - {{ pin_subpackage('ifx_impl_' ~ target_platform, exact=True) }}
+        - binutils_{{ target_platform }} >={{ binutils_version }}  # [linux]
+        - {{ c_stdlib }}_{{ target_platform }}
+        # We don't need actual compiler, we are just using activation script
+        # from there. Ideally we need to create (d)activate-icpx(.sh|.bat) based
+        # on gcc, the same way clang does it:
+        # https://github.com/conda-forge/ctng-compiler-activation-feedstock/blob/9833f5976847c62d43f8058945ac9e5d440806c9/recipe/build.sh#L109-L126
+        - gcc_{{ target_platform }} >={{ c_compiler_version }}  # [linux]
+        - gxx_{{ target_platform }} >={{ c_compiler_version }}  # [linux]
+    about:
+      home: https://software.intel.com/content/www/us/en/develop/tools.html
+      doc_url: https://software.intel.com/content/www/us/en/develop/tools/oneapi/components/dpc-compiler.html
+      dev_url: https://software.intel.com/content/www/us/en/develop/documentation/oneapi-dpcpp-cpp-compiler-dev-guide-and-reference/top.html
+      summary: Implementation for Intel® oneAPI DPC++/C++ Compiler
+      license: LicenseRef-Proprietary-Intel-End-User-License-Agreement-for-Developer-Tools
+      license_family: Proprietary
+      license_file:                                                   # [linux64 or win64]
+        - ifx_impl_{{ target_platform }}/info/licenses/license.txt  # [linux64 or win64]
+        - ifx_impl_{{ target_platform }}/info/licenses/tpp.txt      # [linux64 or win64]
+      description: |
+        Activation for Intel® oneAPI DPC++/C++ Compiler.
+        This package is a repackaged set of binaries obtained directly from Intel's Anaconda.org channel.
+    test:
+      requires:
+        - {{ compiler('c') }}
+        - {{ compiler('cxx') }}
+        - {{ stdlib('c') }}
+      files:
+        - simple.cpp
+      commands:
+        - ls -A1 ${PREFIX}/bin/*         # [unix]
+        - ls -A1 ${PREFIX}/include/*     # [unix]
+        - ls -A1 ${PREFIX}/lib/*         # [unix]
+        - dir %PREFIX%\Library\bin\*  # [win]
+        - dir %PREFIX%\Library\lib\*  # [win]
+        - ifx -fsycl ${CXXFLAGS} simple.cpp ${LDFLAGS} -lpthread -o simple.exe  # [unix]
+        - ifx -fsycl simple.cpp -I%PREFIX%\include -o simple.exe  # [win]
+
   - name: oneccl-devel
     version: {{ oneccl_version }}
     script: repack.sh   # [unix]
